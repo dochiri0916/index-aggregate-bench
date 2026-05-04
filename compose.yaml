@@ -1,0 +1,38 @@
+services:
+  app:
+    build:
+      context: .
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/index_aggregate_bench?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+      SPRING_DATASOURCE_USERNAME: index_bench
+      SPRING_DATASOURCE_PASSWORD: index_bench
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+      BENCHMARK_RAW_QUERY_TIMEOUT_MILLIS: "3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    command:
+      - --innodb-buffer-pool-size=1G
+      - --max-connections=200
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: index_aggregate_bench
+      MYSQL_USER: index_bench
+      MYSQL_PASSWORD: index_bench
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mysql-data:
