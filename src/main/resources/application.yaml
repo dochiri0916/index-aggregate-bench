@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: index-aggregate-bench
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/index_aggregate_bench?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8}
+    username: ${SPRING_DATASOURCE_USERNAME:index_bench}
+    password: ${SPRING_DATASOURCE_PASSWORD:index_bench}
+
+benchmark:
+  raw:
+    query-timeout-millis: ${BENCHMARK_RAW_QUERY_TIMEOUT_MILLIS:0}
