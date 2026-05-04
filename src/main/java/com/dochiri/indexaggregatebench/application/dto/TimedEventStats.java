@@ -1,9 +1,9 @@
 package com.dochiri.indexaggregatebench.application.dto;
 
-public record TimedVehicleStats(
-        VehicleStatsBackend backend,
+public record TimedEventStats(
+        EventStatsBackend backend,
         boolean cacheHit,
         long elapsedMillis,
-        VehicleStats stats
+        EventStats stats
 ) {
 }

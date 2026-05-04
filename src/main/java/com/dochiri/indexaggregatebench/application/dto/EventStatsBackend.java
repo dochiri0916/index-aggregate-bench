@@ -1,6 +1,6 @@
 package com.dochiri.indexaggregatebench.application.dto;
 
-public enum VehicleStatsBackend {
+public enum EventStatsBackend {
     RAW,
     DAILY_STATS
 }

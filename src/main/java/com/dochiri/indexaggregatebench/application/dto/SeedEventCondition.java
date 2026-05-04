@@ -2,25 +2,25 @@ package com.dochiri.indexaggregatebench.application.dto;
 
 import java.time.LocalDate;
 
-public record SeedVehicleCondition(
+public record SeedEventCondition(
         LocalDate from,
         int days,
-        int idCount,
-        int recordsPerIdPerDay,
+        int targetCount,
+        int recordsPerTargetPerDay,
         boolean truncate
 ) {
-    public SeedVehicleCondition {
+    public SeedEventCondition {
         if (from == null) {
             from = LocalDate.now().minusDays(30);
         }
         if (days <= 0) {
             days = 30;
         }
-        if (idCount <= 0) {
-            idCount = 1_000;
+        if (targetCount <= 0) {
+            targetCount = 1_000;
         }
-        if (recordsPerIdPerDay <= 0) {
-            recordsPerIdPerDay = 10;
+        if (recordsPerTargetPerDay <= 0) {
+            recordsPerTargetPerDay = 10;
         }
     }
 }

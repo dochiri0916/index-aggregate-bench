@@ -10,12 +10,12 @@ import java.util.Map;
 public class SchemaIndexService {
 
     private static final List<IndexDefinition> RAW_INDEXES = List.of(
-            new IndexDefinition("vehicles", "idx_vehicles_started_id_battery",
-                    "CREATE INDEX idx_vehicles_started_id_battery ON vehicles (started_at, id, battery_id)"),
-            new IndexDefinition("vehicles", "idx_vehicles_id_started",
-                    "CREATE INDEX idx_vehicles_id_started ON vehicles (id, started_at)"),
-            new IndexDefinition("vehicles", "idx_vehicles_battery_started",
-                    "CREATE INDEX idx_vehicles_battery_started ON vehicles (battery_id, started_at)")
+            new IndexDefinition("event_logs", "idx_event_logs_occurred_target_segment",
+                    "CREATE INDEX idx_event_logs_occurred_target_segment ON event_logs (occurred_at, target_id, segment_id)"),
+            new IndexDefinition("event_logs", "idx_event_logs_target_occurred",
+                    "CREATE INDEX idx_event_logs_target_occurred ON event_logs (target_id, occurred_at)"),
+            new IndexDefinition("event_logs", "idx_event_logs_segment_occurred",
+                    "CREATE INDEX idx_event_logs_segment_occurred ON event_logs (segment_id, occurred_at)")
     );
 
     private final JdbcTemplate jdbcTemplate;
@@ -26,18 +26,18 @@ public class SchemaIndexService {
 
     public Map<String, Boolean> rawIndexStatus() {
         return Map.of(
-                "idx_vehicles_started_id_battery", exists("vehicles", "idx_vehicles_started_id_battery"),
-                "idx_vehicles_id_started", exists("vehicles", "idx_vehicles_id_started"),
-                "idx_vehicles_battery_started", exists("vehicles", "idx_vehicles_battery_started")
+                "idx_event_logs_occurred_target_segment", exists("event_logs", "idx_event_logs_occurred_target_segment"),
+                "idx_event_logs_target_occurred", exists("event_logs", "idx_event_logs_target_occurred"),
+                "idx_event_logs_segment_occurred", exists("event_logs", "idx_event_logs_segment_occurred")
         );
     }
 
     public Map<String, Long> rowCounts() {
-        Long rawRows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM vehicles", Long.class);
-        Long vehicleDailyStatsRows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM vehicle_daily_stats", Long.class);
+        Long rawRows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM event_logs", Long.class);
+        Long eventDailyStatsRows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM event_daily_stats", Long.class);
         return Map.of(
-                "vehicles", rawRows == null ? 0 : rawRows,
-                "vehicleDailyStats", vehicleDailyStatsRows == null ? 0 : vehicleDailyStatsRows
+                "eventLogs", rawRows == null ? 0 : rawRows,
+                "eventDailyStats", eventDailyStatsRows == null ? 0 : eventDailyStatsRows
         );
     }
 

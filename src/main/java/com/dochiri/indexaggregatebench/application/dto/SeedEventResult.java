@@ -1,7 +1,7 @@
 package com.dochiri.indexaggregatebench.application.dto;
 
-public record RebuildVehicleDailyStatsResult(
-        int vehicleDailyStatsRows,
+public record SeedEventResult(
+        long insertedRows,
         long elapsedMillis
 ) {
 }

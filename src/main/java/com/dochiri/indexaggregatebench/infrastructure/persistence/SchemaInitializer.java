@@ -17,35 +17,35 @@ public class SchemaInitializer implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS vehicles (
+                CREATE TABLE IF NOT EXISTS event_logs (
                     record_id BIGINT NOT NULL AUTO_INCREMENT,
-                    id BIGINT NOT NULL,
-                    battery_id BIGINT NOT NULL,
-                    started_at DATETIME(6) NOT NULL,
-                    ended_at DATETIME(6) NOT NULL,
-                    distance_meters INT NOT NULL,
-                    consumed_wh INT NOT NULL,
+                    target_id BIGINT NOT NULL,
+                    segment_id BIGINT NOT NULL,
+                    occurred_at DATETIME(6) NOT NULL,
+                    duration_seconds INT NOT NULL,
+                    metric_value INT NOT NULL,
+                    cost_value INT NOT NULL,
                     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
                     PRIMARY KEY (record_id),
-                    INDEX idx_vehicles_started_id_battery (started_at, id, battery_id),
-                    INDEX idx_vehicles_id_started (id, started_at),
-                    INDEX idx_vehicles_battery_started (battery_id, started_at)
+                    INDEX idx_event_logs_occurred_target_segment (occurred_at, target_id, segment_id),
+                    INDEX idx_event_logs_target_occurred (target_id, occurred_at),
+                    INDEX idx_event_logs_segment_occurred (segment_id, occurred_at)
                 )
                 """);
 
         jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS vehicle_daily_stats (
+                CREATE TABLE IF NOT EXISTS event_daily_stats (
                     stat_date DATE NOT NULL,
-                    id BIGINT NOT NULL,
-                    battery_id BIGINT NOT NULL,
+                    target_id BIGINT NOT NULL,
+                    segment_id BIGINT NOT NULL,
                     log_count BIGINT NOT NULL,
-                    total_driving_seconds BIGINT NOT NULL,
-                    total_distance_meters BIGINT NOT NULL,
-                    total_consumed_wh BIGINT NOT NULL,
+                    total_duration_seconds BIGINT NOT NULL,
+                    total_metric_value BIGINT NOT NULL,
+                    total_cost_value BIGINT NOT NULL,
                     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                    PRIMARY KEY (stat_date, id, battery_id),
-                    INDEX idx_daily_id_date (id, stat_date),
-                    INDEX idx_daily_battery_date (battery_id, stat_date)
+                    PRIMARY KEY (stat_date, target_id, segment_id),
+                    INDEX idx_daily_target_date (target_id, stat_date),
+                    INDEX idx_daily_segment_date (segment_id, stat_date)
                 )
                 """);
     }

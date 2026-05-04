@@ -2,13 +2,13 @@ package com.dochiri.indexaggregatebench.application.dto;
 
 import java.time.LocalDate;
 
-public record VehicleStatsQuery(
-        Long id,
-        Long batteryId,
+public record EventStatsQuery(
+        Long targetId,
+        Long segmentId,
         LocalDate from,
         LocalDate to
 ) {
-    public VehicleStatsQuery {
+    public EventStatsQuery {
         if (from == null || to == null) {
             throw new IllegalArgumentException("from and to are required");
         }
