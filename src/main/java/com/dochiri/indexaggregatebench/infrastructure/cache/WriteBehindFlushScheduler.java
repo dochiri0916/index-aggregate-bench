@@ -15,11 +15,14 @@ public class WriteBehindFlushScheduler {
 
     private final WriteBehindBuffer buffer;
     private final JdbcEventDailyStatsCommandAdapter eventDailyStatsAdapter;
+    private final InMemoryEventStatsCache statsCache;
 
     public WriteBehindFlushScheduler(WriteBehindBuffer buffer,
-                                     JdbcEventDailyStatsCommandAdapter eventDailyStatsAdapter) {
+                                     JdbcEventDailyStatsCommandAdapter eventDailyStatsAdapter,
+                                     InMemoryEventStatsCache statsCache) {
         this.buffer = buffer;
         this.eventDailyStatsAdapter = eventDailyStatsAdapter;
+        this.statsCache = statsCache;
     }
 
     @Scheduled(fixedDelayString = "${bench.write-behind.flush-interval-ms:5000}")
@@ -28,7 +31,13 @@ public class WriteBehindFlushScheduler {
         if (batch.isEmpty()) {
             return;
         }
-        int applied = eventDailyStatsAdapter.increaseBatch(batch);
-        log.debug("Write-behind flushed {} merged keys to event_daily_stats", applied);
+        try {
+            int applied = eventDailyStatsAdapter.increaseBatch(batch);
+            statsCache.markFlushed(batch);
+            log.debug("Write-behind flushed {} merged keys to event_daily_stats", applied);
+        } catch (RuntimeException exception) {
+            buffer.restore(batch);
+            log.error("Write-behind flush failed. batchSize={}", batch.size(), exception);
+        }
     }
 }

@@ -4,6 +4,7 @@ import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
 import com.dochiri.indexaggregatebench.application.dto.DailyStatsKey;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsCacheKey;
+import com.dochiri.indexaggregatebench.application.dto.EventStatsBackend;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
 import org.springframework.stereotype.Component;
 
@@ -11,13 +12,17 @@ import java.time.LocalDate;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class InMemoryEventStatsCache {
 
     private final Map<EventStatsCacheKey, EventStats> queryCache = new ConcurrentHashMap<>();
-    private final Map<DailyStatsKey, AtomicAggregate> cellCache = new ConcurrentHashMap<>();
+    private final Map<DailyStatsKey, AtomicAggregate> baseCellCache = new ConcurrentHashMap<>();
+    private final Map<DailyStatsKey, AtomicAggregate> pendingCellCache = new ConcurrentHashMap<>();
+    private final Set<EventStatsCacheKey> loadedDailyQueries = ConcurrentHashMap.newKeySet();
+    private final Set<DailyStatsKey> loadedBaseKeys = ConcurrentHashMap.newKeySet();
 
     // ── Query-level cache (RAW backend, legacy) ──
 
@@ -48,59 +53,100 @@ public class InMemoryEventStatsCache {
 
     public void incrementCell(AppendEventCommand command) {
         DailyStatsKey key = DailyStatsKey.from(command);
-        cellCache.computeIfAbsent(key, k -> new AtomicAggregate())
+        pendingCellCache.computeIfAbsent(key, k -> new AtomicAggregate())
                 .add(command.durationSeconds(), command.metricValue(), command.costValue());
     }
 
-    public void loadCells(Map<DailyStatsKey, AtomicAggregate> cells) {
+    public boolean hasLoadedCells(EventStatsQuery query) {
+        return loadedDailyQueries.contains(EventStatsCacheKey.of(EventStatsBackend.DAILY_STATS, query));
+    }
+
+    public void loadCells(EventStatsQuery query, Map<DailyStatsKey, AtomicAggregate> cells) {
+        loadedDailyQueries.add(EventStatsCacheKey.of(EventStatsBackend.DAILY_STATS, query));
         for (Map.Entry<DailyStatsKey, AtomicAggregate> entry : cells.entrySet()) {
-            cellCache.putIfAbsent(entry.getKey(), entry.getValue());
+            if (loadedBaseKeys.add(entry.getKey())) {
+                baseCellCache.put(entry.getKey(), copyOf(entry.getValue()));
+            }
         }
     }
 
     public Optional<EventStats> aggregateFromCells(EventStatsQuery query) {
-        LocalDate current = query.from();
-        AtomicAggregate result = new AtomicAggregate();
-        boolean anyCellFound = false;
+        if (!hasLoadedCells(query)) {
+            return Optional.empty();
+        }
 
+        AtomicAggregate result = new AtomicAggregate();
+        addMatchingCells(query, result, baseCellCache);
+        addMatchingCells(query, result, pendingCellCache);
+        return Optional.of(result.toEventStats());
+    }
+
+    public void markFlushed(Iterable<WriteBehindBuffer.MergedCommand> batch) {
+        for (WriteBehindBuffer.MergedCommand command : batch) {
+            DailyStatsKey key = command.key();
+            if (loadedBaseKeys.contains(key)) {
+                baseCellCache.computeIfAbsent(key, ignored -> new AtomicAggregate())
+                        .add(command.logCount(), command.totalDurationSeconds(),
+                                command.totalMetricValue(), command.totalCostValue());
+            }
+            AtomicAggregate pending = pendingCellCache.get(key);
+            if (pending == null) {
+                continue;
+            }
+            pending.add(-command.logCount(), -command.totalDurationSeconds(),
+                    -command.totalMetricValue(), -command.totalCostValue());
+            if (pending.isZero()) {
+                pendingCellCache.remove(key, pending);
+            }
+        }
+    }
+
+    private void addMatchingCells(EventStatsQuery query,
+                                  AtomicAggregate result,
+                                  Map<DailyStatsKey, AtomicAggregate> source) {
+        LocalDate current = query.from();
         while (!current.isAfter(query.to())) {
-            for (Map.Entry<DailyStatsKey, AtomicAggregate> entry : cellCache.entrySet()) {
+            for (Map.Entry<DailyStatsKey, AtomicAggregate> entry : source.entrySet()) {
                 DailyStatsKey key = entry.getKey();
                 if (!key.statDate().equals(current)) {
                     continue;
                 }
-                if (query.targetId() != null && key.targetId() != query.targetId()) {
+                if (query.targetId() != null && !query.targetId().equals(key.targetId())) {
                     continue;
                 }
-                if (query.segmentId() != null && key.segmentId() != query.segmentId()) {
+                if (query.segmentId() != null && !query.segmentId().equals(key.segmentId())) {
                     continue;
                 }
                 AtomicAggregate cell = entry.getValue();
                 result.add(cell.logCount(), cell.totalDurationSeconds(),
                         cell.totalMetricValue(), cell.totalCostValue());
-                anyCellFound = true;
             }
             current = current.plusDays(1);
         }
+    }
 
-        if (!anyCellFound) {
-            return Optional.empty();
-        }
-        return Optional.of(result.toEventStats());
+    private AtomicAggregate copyOf(AtomicAggregate source) {
+        AtomicAggregate copied = new AtomicAggregate();
+        copied.add(source.logCount(), source.totalDurationSeconds(),
+                source.totalMetricValue(), source.totalCostValue());
+        return copied;
     }
 
     // ── Shared ──
 
     public int clear() {
         int querySize = queryCache.size();
-        int cellSize = cellCache.size();
+        int cellSize = baseCellCache.size() + pendingCellCache.size();
         queryCache.clear();
-        cellCache.clear();
+        baseCellCache.clear();
+        pendingCellCache.clear();
+        loadedDailyQueries.clear();
+        loadedBaseKeys.clear();
         return querySize + cellSize;
     }
 
     public int size() {
-        return queryCache.size() + cellCache.size();
+        return queryCache.size() + baseCellCache.size() + pendingCellCache.size();
     }
 
     public int queryCacheSize() {
@@ -108,6 +154,6 @@ public class InMemoryEventStatsCache {
     }
 
     public int cellCacheSize() {
-        return cellCache.size();
+        return baseCellCache.size() + pendingCellCache.size();
     }
 }

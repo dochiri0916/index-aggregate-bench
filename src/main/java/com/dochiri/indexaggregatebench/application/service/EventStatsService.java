@@ -42,13 +42,10 @@ public class EventStatsService {
             return new TimedEventStats(EventStatsBackend.DAILY_STATS, false, elapsedMillis(started), stats);
         }
 
-        EventStats cached = statsCache.aggregateFromCells(query).orElse(null);
-        if (cached != null) {
-            return new TimedEventStats(EventStatsBackend.DAILY_STATS, true, elapsedMillis(started), cached);
+        if (!statsCache.hasLoadedCells(query)) {
+            statsCache.loadCells(query, dailyStatsAdapter.loadCells(query));
         }
-
-        statsCache.loadCells(dailyStatsAdapter.loadCells(query));
-        cached = statsCache.aggregateFromCells(query).orElse(null);
+        EventStats cached = statsCache.aggregateFromCells(query).orElse(null);
         if (cached != null) {
             return new TimedEventStats(EventStatsBackend.DAILY_STATS, true, elapsedMillis(started), cached);
         }

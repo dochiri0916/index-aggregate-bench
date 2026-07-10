@@ -52,6 +52,10 @@ public class AtomicAggregate {
         return new EventStats(count, duration, metric, cost, avgDuration, metricPerCost);
     }
 
+    public boolean isZero() {
+        return logCount() == 0 && totalDurationSeconds() == 0 && totalMetricValue() == 0 && totalCostValue() == 0;
+    }
+
     public long logCount() {
         return logCount.get();
     }
