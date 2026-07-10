@@ -8,6 +8,7 @@ import com.dochiri.indexaggregatebench.application.dto.SeedEventResult;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsBackend;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
 import com.dochiri.indexaggregatebench.application.dto.TimedEventStats;
+import com.dochiri.indexaggregatebench.infrastructure.cache.WriteBehindBuffer;
 import com.dochiri.indexaggregatebench.infrastructure.persistence.JdbcEventDailyStatsCommandAdapter;
 import com.dochiri.indexaggregatebench.infrastructure.persistence.EventLogPersistenceAdapter;
 import org.springframework.stereotype.Service;
@@ -21,13 +22,16 @@ public class EventLogService {
     private final EventLogPersistenceAdapter eventLogPersistenceAdapter;
     private final JdbcEventDailyStatsCommandAdapter eventDailyStatsAdapter;
     private final EventStatsService eventStatsService;
+    private final WriteBehindBuffer writeBehindBuffer;
 
     public EventLogService(EventLogPersistenceAdapter eventLogPersistenceAdapter,
                           JdbcEventDailyStatsCommandAdapter eventDailyStatsAdapter,
-                          EventStatsService eventStatsService) {
+                          EventStatsService eventStatsService,
+                          WriteBehindBuffer writeBehindBuffer) {
         this.eventLogPersistenceAdapter = eventLogPersistenceAdapter;
         this.eventDailyStatsAdapter = eventDailyStatsAdapter;
         this.eventStatsService = eventStatsService;
+        this.writeBehindBuffer = writeBehindBuffer;
     }
 
     public SeedEventResult seed(SeedEventCondition condition) {
@@ -84,11 +88,10 @@ public class EventLogService {
         );
     }
 
-    @Transactional
     public void append(AppendEventCommand command) {
         eventLogPersistenceAdapter.append(command);
-        eventDailyStatsAdapter.increase(command);
-        eventStatsService.evictRelated(command.targetId(), command.segmentId());
+        eventStatsService.incrementCell(command);
+        writeBehindBuffer.record(command);
     }
 
     private long elapsedMillis(long startedNanos) {

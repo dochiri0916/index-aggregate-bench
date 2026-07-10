@@ -51,33 +51,6 @@ public class JdbcEventStatsAdapter {
         });
     }
 
-    public EventStats aggregateFromDailyStats(EventStatsQuery query) {
-        QueryParts parts = dailyStatsQuery(query);
-        return jdbcTemplate.query(parts.sql(), ps -> {
-            for (int i = 0; i < parts.params().size(); i++) {
-                ps.setObject(i + 1, parts.params().get(i));
-            }
-        }, rs -> {
-            if (!rs.next()) {
-                return emptyStats();
-            }
-
-            long logCount = rs.getLong("log_count");
-            long totalDurationSeconds = rs.getLong("total_duration_seconds");
-            long totalMetricValue = rs.getLong("total_metric_value");
-            long totalCostValue = rs.getLong("total_cost_value");
-
-            return new EventStats(
-                    logCount,
-                    totalDurationSeconds,
-                    totalMetricValue,
-                    totalCostValue,
-                    average(totalDurationSeconds, logCount),
-                    ratio(totalMetricValue, totalCostValue)
-            );
-        });
-    }
-
     private QueryParts rawGroupByQuery(EventStatsQuery query) {
         StringBuilder sql = new StringBuilder("""
                 SELECT
@@ -105,32 +78,6 @@ public class JdbcEventStatsAdapter {
         }
 
         sql.append("GROUP BY DATE(occurred_at), target_id, segment_id");
-        return new QueryParts(sql.toString(), params);
-    }
-
-    private QueryParts dailyStatsQuery(EventStatsQuery query) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT
-                    COALESCE(SUM(log_count), 0) AS log_count,
-                    COALESCE(SUM(total_duration_seconds), 0) AS total_duration_seconds,
-                    COALESCE(SUM(total_metric_value), 0) AS total_metric_value,
-                    COALESCE(SUM(total_cost_value), 0) AS total_cost_value
-                FROM event_daily_stats
-                WHERE stat_date BETWEEN ? AND ?
-                """);
-        List<Object> params = new java.util.ArrayList<>();
-        params.add(query.from());
-        params.add(query.to());
-
-        if (query.targetId() != null) {
-            sql.append("  AND target_id = ?\n");
-            params.add(query.targetId());
-        }
-        if (query.segmentId() != null) {
-            sql.append("  AND segment_id = ?\n");
-            params.add(query.segmentId());
-        }
-
         return new QueryParts(sql.toString(), params);
     }
 
