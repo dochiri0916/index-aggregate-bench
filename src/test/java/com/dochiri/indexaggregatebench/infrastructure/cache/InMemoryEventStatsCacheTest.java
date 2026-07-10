@@ -1,105 +1,87 @@
 package com.dochiri.indexaggregatebench.infrastructure.cache;
 
-import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
-import com.dochiri.indexaggregatebench.application.dto.DailyStatsKey;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
+import com.dochiri.indexaggregatebench.application.dto.EventStatsBackend;
+import com.dochiri.indexaggregatebench.application.dto.EventStatsCacheKey;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class InMemoryEventStatsCacheTest {
 
     @Test
-    @DisplayName("조회 범위가 로드되기 전에는 일부 증분 셀만으로 통계를 반환하지 않는다")
-    void aggregateShouldMissBeforeQueryCellsLoaded() {
+    @DisplayName("이벤트가 추가되면 정확히 일치하는 조회와 전체 범위 조회 캐시를 함께 제거한다")
+    void evictRelatedShouldRemoveExactAndWildcardQueries() {
         // given
         InMemoryEventStatsCache cache = new InMemoryEventStatsCache();
-        EventStatsQuery query = new EventStatsQuery(1L, 1L,
-                LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30));
-        cache.incrementCell(command(LocalDateTime.of(2026, 4, 1, 10, 0)));
+        EventStats stats = stats();
+        EventStatsQuery exact = query(1L, 1L);
+        EventStatsQuery allTargets = query(null, 1L);
+        EventStatsQuery allSegments = query(1L, null);
+        EventStatsQuery unrelated = query(2L, 2L);
+        cache.put(key(exact), stats);
+        cache.put(key(allTargets), stats);
+        cache.put(key(allSegments), stats);
+        cache.put(key(unrelated), stats);
 
         // when
-        var result = cache.aggregateFromCells(query);
+        int evicted = cache.evictRelated(1L, 1L);
 
         // then
-        assertThat(result).isEmpty();
+        assertThat(evicted).isEqualTo(3);
+        assertThat(cache.get(key(exact))).isEmpty();
+        assertThat(cache.get(key(allTargets))).isEmpty();
+        assertThat(cache.get(key(allSegments))).isEmpty();
+        assertThat(cache.get(key(unrelated))).contains(stats);
     }
 
     @Test
-    @DisplayName("DB 기준 셀과 아직 flush되지 않은 증분 셀을 함께 집계한다")
-    void aggregateShouldCombineLoadedBaseCellsAndPendingCells() {
+    @DisplayName("캐시에 저장한 통계는 같은 조건으로 다시 조회할 수 있다")
+    void putShouldMakeStatsAvailableBySameKey() {
         // given
         InMemoryEventStatsCache cache = new InMemoryEventStatsCache();
-        EventStatsQuery query = new EventStatsQuery(1L, 1L,
-                LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30));
-        DailyStatsKey key = new DailyStatsKey(LocalDate.of(2026, 4, 1), 1L, 1L);
-        AtomicAggregate base = new AtomicAggregate();
-        base.add(10, 100, 50, 25);
-        cache.incrementCell(command(LocalDateTime.of(2026, 4, 1, 10, 0)));
-        cache.loadCells(query, Map.of(key, base));
+        EventStatsCacheKey key = key(query(1L, 1L));
+        EventStats stats = stats();
 
         // when
-        EventStats result = cache.aggregateFromCells(query).orElseThrow();
+        cache.put(key, stats);
 
         // then
-        assertThat(result.logCount()).isEqualTo(11);
-        assertThat(result.totalDurationSeconds()).isEqualTo(103);
-        assertThat(result.totalMetricValue()).isEqualTo(55);
-        assertThat(result.totalCostValue()).isEqualTo(32);
+        assertThat(cache.get(key)).contains(stats);
+        assertThat(cache.size()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("flush된 증분 셀은 로드된 기준 셀로 이동해 중복 집계하지 않는다")
-    void markFlushedShouldMovePendingCellsToLoadedBaseCells() {
+    @DisplayName("전체 캐시 제거는 제거한 항목 수를 반환한다")
+    void clearShouldReturnEvictedEntryCount() {
         // given
         InMemoryEventStatsCache cache = new InMemoryEventStatsCache();
-        EventStatsQuery query = new EventStatsQuery(1L, 1L,
-                LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30));
-        DailyStatsKey key = new DailyStatsKey(LocalDate.of(2026, 4, 1), 1L, 1L);
-        AtomicAggregate base = new AtomicAggregate();
-        base.add(10, 100, 50, 25);
-        cache.incrementCell(command(LocalDateTime.of(2026, 4, 1, 10, 0)));
-        cache.loadCells(query, Map.of(key, base));
-        WriteBehindBuffer.MergedCommand flushed = new WriteBehindBuffer.MergedCommand(key, 1, 3, 5, 7);
+        cache.put(key(query(1L, 1L)), stats());
+        cache.put(key(query(2L, 2L)), stats());
 
         // when
-        cache.markFlushed(List.of(flushed));
-        EventStats result = cache.aggregateFromCells(query).orElseThrow();
+        int evicted = cache.clear();
 
         // then
-        assertThat(result.logCount()).isEqualTo(11);
-        assertThat(result.totalDurationSeconds()).isEqualTo(103);
-        assertThat(result.totalMetricValue()).isEqualTo(55);
-        assertThat(result.totalCostValue()).isEqualTo(32);
+        assertThat(evicted).isEqualTo(2);
+        assertThat(cache.size()).isZero();
     }
 
-    @Test
-    @DisplayName("DB에 데이터가 없는 조회 범위도 로드 후에는 빈 통계로 반환한다")
-    void aggregateShouldReturnEmptyStatsAfterEmptyQueryLoaded() {
-        // given
-        InMemoryEventStatsCache cache = new InMemoryEventStatsCache();
-        EventStatsQuery query = new EventStatsQuery(1L, 1L,
+    private EventStatsCacheKey key(EventStatsQuery query) {
+        return EventStatsCacheKey.of(EventStatsBackend.RAW, query);
+    }
+
+    private EventStatsQuery query(Long targetId, Long segmentId) {
+        return new EventStatsQuery(targetId, segmentId,
                 LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30));
-        cache.loadCells(query, Map.of());
-
-        // when
-        EventStats result = cache.aggregateFromCells(query).orElseThrow();
-
-        // then
-        assertThat(result.logCount()).isZero();
-        assertThat(result.totalDurationSeconds()).isZero();
-        assertThat(result.totalMetricValue()).isZero();
-        assertThat(result.totalCostValue()).isZero();
     }
 
-    private AppendEventCommand command(LocalDateTime occurredAt) {
-        return new AppendEventCommand(1L, 1L, occurredAt, 3, 5, 7);
+    private EventStats stats() {
+        return new EventStats(1, 3, 5, 7, BigDecimal.valueOf(3), BigDecimal.valueOf(0.71));
     }
 }

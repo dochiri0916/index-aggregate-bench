@@ -2,6 +2,7 @@ package com.dochiri.indexaggregatebench.infrastructure.persistence;
 
 import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
 import com.dochiri.indexaggregatebench.application.dto.SeedEventCondition;
+import com.dochiri.indexaggregatebench.application.port.out.EventLogPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Repository
-public class EventLogPersistenceAdapter {
+public class EventLogPersistenceAdapter implements EventLogPort {
 
     private static final int BATCH_SIZE = 5_000;
 
@@ -23,6 +24,7 @@ public class EventLogPersistenceAdapter {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    @Override
     public long seed(SeedEventCondition condition) {
         long totalRows = (long) condition.days() * condition.targetCount() * condition.recordsPerTargetPerDay();
         if (totalRows >= BATCH_SIZE * 20L) {
@@ -31,10 +33,12 @@ public class EventLogPersistenceAdapter {
         return seedWithJdbcBatch(condition);
     }
 
+    @Override
     public void truncate() {
         jdbcTemplate.update("TRUNCATE TABLE event_logs");
     }
 
+    @Override
     public void append(AppendEventCommand command) {
         jdbcTemplate.update("""
                 INSERT INTO event_logs (

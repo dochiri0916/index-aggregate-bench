@@ -1,83 +1,45 @@
 package com.dochiri.indexaggregatebench.application.service;
 
-import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsBackend;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsCacheKey;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
 import com.dochiri.indexaggregatebench.application.dto.TimedEventStats;
-import com.dochiri.indexaggregatebench.infrastructure.cache.InMemoryEventStatsCache;
-import com.dochiri.indexaggregatebench.infrastructure.persistence.JdbcEventDailyStatsCommandAdapter;
-import com.dochiri.indexaggregatebench.infrastructure.persistence.JdbcEventStatsAdapter;
+import com.dochiri.indexaggregatebench.application.port.out.EventDailyStatsPort;
+import com.dochiri.indexaggregatebench.application.port.out.EventStatsCachePort;
+import com.dochiri.indexaggregatebench.application.port.out.EventStatsQueryPort;
 import org.springframework.stereotype.Service;
 
 @Service
 public class EventStatsService {
 
-    private final JdbcEventStatsAdapter eventStatsAdapter;
-    private final JdbcEventDailyStatsCommandAdapter dailyStatsAdapter;
-    private final InMemoryEventStatsCache statsCache;
+    private final EventStatsQueryPort eventStatsQueryPort;
+    private final EventDailyStatsPort eventDailyStatsPort;
+    private final EventStatsCachePort statsCache;
 
-    public EventStatsService(JdbcEventStatsAdapter eventStatsAdapter,
-                             JdbcEventDailyStatsCommandAdapter dailyStatsAdapter,
-                             InMemoryEventStatsCache statsCache) {
-        this.eventStatsAdapter = eventStatsAdapter;
-        this.dailyStatsAdapter = dailyStatsAdapter;
+    public EventStatsService(EventStatsQueryPort eventStatsQueryPort,
+                             EventDailyStatsPort eventDailyStatsPort,
+                             EventStatsCachePort statsCache) {
+        this.eventStatsQueryPort = eventStatsQueryPort;
+        this.eventDailyStatsPort = eventDailyStatsPort;
         this.statsCache = statsCache;
     }
 
     public TimedEventStats getStats(EventStatsBackend backend, EventStatsQuery query, boolean useCache) {
         long started = System.nanoTime();
-
-        if (backend == EventStatsBackend.DAILY_STATS) {
-            return getDailyStats(query, useCache, started);
-        }
-
-        return getRawStats(query, useCache, started);
-    }
-
-    private TimedEventStats getDailyStats(EventStatsQuery query, boolean useCache, long started) {
-        if (!useCache) {
-            EventStats stats = dailyStatsAdapter.aggregateFromDailyStats(query);
-            return new TimedEventStats(EventStatsBackend.DAILY_STATS, false, elapsedMillis(started), stats);
-        }
-
-        if (!statsCache.hasLoadedCells(query)) {
-            statsCache.loadCells(query, dailyStatsAdapter.loadCells(query));
-        }
-        EventStats cached = statsCache.aggregateFromCells(query).orElse(null);
-        if (cached != null) {
-            return new TimedEventStats(EventStatsBackend.DAILY_STATS, true, elapsedMillis(started), cached);
-        }
-
-        EventStats stats = dailyStatsAdapter.aggregateFromDailyStats(query);
-        return new TimedEventStats(EventStatsBackend.DAILY_STATS, false, elapsedMillis(started), stats);
-    }
-
-    private TimedEventStats getRawStats(EventStatsQuery query, boolean useCache, long started) {
-        EventStatsCacheKey key = EventStatsCacheKey.of(EventStatsBackend.RAW, query);
-
+        EventStatsCacheKey key = EventStatsCacheKey.of(backend, query);
         if (useCache) {
             EventStats cached = statsCache.get(key).orElse(null);
             if (cached != null) {
-                return new TimedEventStats(EventStatsBackend.RAW, true, elapsedMillis(started), cached);
+                return new TimedEventStats(backend, true, elapsedMillis(started), cached);
             }
         }
 
-        EventStats stats = eventStatsAdapter.aggregateFromRawEventLogs(query);
+        EventStats stats = aggregate(backend, query);
         if (useCache) {
             statsCache.put(key, stats);
         }
-
-        return new TimedEventStats(EventStatsBackend.RAW, false, elapsedMillis(started), stats);
-    }
-
-    public void incrementCell(AppendEventCommand command) {
-        statsCache.incrementCell(command);
-    }
-
-    public int evictRelated(Long targetId, Long segmentId) {
-        return statsCache.evictRelated(targetId, segmentId);
+        return new TimedEventStats(backend, false, elapsedMillis(started), stats);
     }
 
     public int clearCache() {
@@ -86,6 +48,13 @@ public class EventStatsService {
 
     public int cacheSize() {
         return statsCache.size();
+    }
+
+    private EventStats aggregate(EventStatsBackend backend, EventStatsQuery query) {
+        if (backend == EventStatsBackend.DAILY_STATS) {
+            return eventDailyStatsPort.aggregate(query);
+        }
+        return eventStatsQueryPort.aggregate(query);
     }
 
     private long elapsedMillis(long startedNanos) {

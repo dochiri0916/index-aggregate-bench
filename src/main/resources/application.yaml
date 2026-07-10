@@ -9,7 +9,3 @@ spring:
 benchmark:
   raw:
     query-timeout-millis: ${BENCHMARK_RAW_QUERY_TIMEOUT_MILLIS:0}
-
-bench:
-  write-behind:
-    flush-interval-ms: ${BENCH_WRITE_BEHIND_FLUSH_INTERVAL_MS:5000}
