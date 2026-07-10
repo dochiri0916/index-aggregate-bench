@@ -1,6 +1,6 @@
 package com.dochiri.indexaggregatebench.infrastructure.persistence;
 
-import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
+import com.dochiri.indexaggregatebench.application.dto.DailyStatsDelta;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
 import com.dochiri.indexaggregatebench.application.port.out.EventDailyStatsPort;
@@ -46,22 +46,36 @@ public class JdbcEventDailyStatsCommandAdapter implements EventDailyStatsPort {
     }
 
     @Override
-    public void increase(AppendEventCommand command) {
-        jdbcTemplate.update("""
+    public int increaseBatch(List<DailyStatsDelta> batch) {
+        if (batch.isEmpty()) {
+            return 0;
+        }
+        String sql = """
                 INSERT INTO event_daily_stats (
                     stat_date, target_id, segment_id, log_count,
                     total_duration_seconds, total_metric_value, total_cost_value
                 )
-                VALUES (?, ?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
-                    log_count = log_count + 1,
+                    log_count = log_count + VALUES(log_count),
                     total_duration_seconds = total_duration_seconds + VALUES(total_duration_seconds),
                     total_metric_value = total_metric_value + VALUES(total_metric_value),
                     total_cost_value = total_cost_value + VALUES(total_cost_value)
-                """,
-                command.occurredAt().toLocalDate(), command.targetId(), command.segmentId(),
-                command.durationSeconds(), command.metricValue(), command.costValue()
-        );
+                """;
+        int[][] counts = jdbcTemplate.batchUpdate(sql, batch, batch.size(), (statement, delta) -> {
+            statement.setObject(1, delta.key().statDate());
+            statement.setLong(2, delta.key().targetId());
+            statement.setLong(3, delta.key().segmentId());
+            statement.setLong(4, delta.logCount());
+            statement.setLong(5, delta.totalDurationSeconds());
+            statement.setLong(6, delta.totalMetricValue());
+            statement.setLong(7, delta.totalCostValue());
+        });
+        int applied = 0;
+        for (int[] countGroup : counts) {
+            applied += countGroup.length;
+        }
+        return applied;
     }
 
     @Override

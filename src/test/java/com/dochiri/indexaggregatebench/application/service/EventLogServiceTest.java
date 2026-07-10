@@ -1,6 +1,7 @@
 package com.dochiri.indexaggregatebench.application.service;
 
 import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
+import com.dochiri.indexaggregatebench.application.dto.DailyStatsDelta;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsBackend;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsCacheKey;
@@ -11,20 +12,42 @@ import com.dochiri.indexaggregatebench.application.port.out.EventDailyStatsPort;
 import com.dochiri.indexaggregatebench.application.port.out.EventLogPort;
 import com.dochiri.indexaggregatebench.application.port.out.EventStatsQueryPort;
 import com.dochiri.indexaggregatebench.infrastructure.cache.InMemoryEventStatsCache;
+import com.dochiri.indexaggregatebench.infrastructure.cache.EventStatsConsistencyLock;
+import com.dochiri.indexaggregatebench.infrastructure.cache.InMemoryEventStatsWriteBehind;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EventLogServiceTest {
 
     @Test
-    @DisplayName("이벤트 추가는 원본과 일별 통계를 함께 변경하고 관련 캐시를 제거한다")
-    void appendShouldUpdateRawAndDailyStatsAndEvictRelatedCache() {
+    @DisplayName("일별 통계 캐시 미스는 저장된 값과 아직 flush되지 않은 값을 함께 반환한다")
+    void dailyStatsCacheMissShouldIncludePendingWriteBehindValues() {
+        // given
+        Fixture fixture = new Fixture();
+        fixture.writeBehind.recordAfterCommit(new AppendEventCommand(
+                1L, 2L, LocalDateTime.of(2026, 4, 1, 10, 0), 3, 5, 7
+        ));
+
+        // when
+        var result = fixture.statsService.getStats(EventStatsBackend.DAILY_STATS, query(1L, 2L), false);
+
+        // then
+        assertThat(result.stats().logCount()).isEqualTo(2);
+        assertThat(result.stats().totalDurationSeconds()).isEqualTo(6);
+        assertThat(result.stats().totalMetricValue()).isEqualTo(10);
+        assertThat(result.stats().totalCostValue()).isEqualTo(14);
+    }
+
+    @Test
+    @DisplayName("이벤트 추가는 원본을 저장하고 일별 통계 버퍼와 캐시에 즉시 반영한다")
+    void appendShouldStoreRawEventAndUpdateWriteBehindAndCache() {
         // given
         Fixture fixture = new Fixture();
         AppendEventCommand command = new AppendEventCommand(
@@ -32,14 +55,17 @@ class EventLogServiceTest {
         );
         EventStatsQuery broadQuery = query(null, 2L);
         fixture.cache.put(EventStatsCacheKey.of(EventStatsBackend.RAW, broadQuery), stats());
+        EventStatsCacheKey dailyKey = EventStatsCacheKey.of(EventStatsBackend.DAILY_STATS, broadQuery);
+        fixture.cache.put(dailyKey, stats());
 
         // when
         fixture.service.append(command);
 
         // then
         assertThat(fixture.eventLogPort.appended).isEqualTo(command);
-        assertThat(fixture.dailyStatsPort.increased).isEqualTo(command);
+        assertThat(fixture.writeBehind.aggregatePending(query(1L, 2L)).logCount()).isEqualTo(1);
         assertThat(fixture.cache.get(EventStatsCacheKey.of(EventStatsBackend.RAW, broadQuery))).isEmpty();
+        assertThat(fixture.cache.get(dailyKey).orElseThrow().logCount()).isEqualTo(2);
     }
 
     @Test
@@ -97,11 +123,13 @@ class EventLogServiceTest {
         private final FakeEventLogPort eventLogPort = new FakeEventLogPort();
         private final FakeDailyStatsPort dailyStatsPort = new FakeDailyStatsPort();
         private final InMemoryEventStatsCache cache = new InMemoryEventStatsCache();
+        private final InMemoryEventStatsWriteBehind writeBehind = new InMemoryEventStatsWriteBehind();
+        private final EventStatsConsistencyLock consistencyLock = new EventStatsConsistencyLock();
         private final EventStatsService statsService = new EventStatsService(
-                new FakeStatsQueryPort(), dailyStatsPort, cache
+                new FakeStatsQueryPort(), dailyStatsPort, cache, writeBehind, consistencyLock
         );
         private final EventLogService service = new EventLogService(
-                eventLogPort, dailyStatsPort, cache, statsService
+                eventLogPort, dailyStatsPort, cache, writeBehind, consistencyLock, statsService
         );
     }
 
@@ -133,7 +161,7 @@ class EventLogServiceTest {
         private int rebuildRows;
         private LocalDate rebuiltFrom;
         private LocalDate rebuiltTo;
-        private AppendEventCommand increased;
+        private List<DailyStatsDelta> increasedBatch = List.of();
 
         @Override
         public void truncate() {
@@ -148,8 +176,9 @@ class EventLogServiceTest {
         }
 
         @Override
-        public void increase(AppendEventCommand command) {
-            increased = command;
+        public int increaseBatch(List<DailyStatsDelta> batch) {
+            increasedBatch = List.copyOf(batch);
+            return batch.size();
         }
 
         @Override

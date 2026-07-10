@@ -1,5 +1,6 @@
 package com.dochiri.indexaggregatebench.application.port.out;
 
+import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsCacheKey;
 
@@ -10,6 +11,7 @@ public interface EventStatsCachePort {
     void put(EventStatsCacheKey key, EventStats stats);
     int evictRelated(Long targetId, Long segmentId);
     void evictRelatedAfterCommit(Long targetId, Long segmentId);
+    void applyEventAfterCommit(AppendEventCommand command);
     int clear();
     void clearAfterCommit();
     int size();

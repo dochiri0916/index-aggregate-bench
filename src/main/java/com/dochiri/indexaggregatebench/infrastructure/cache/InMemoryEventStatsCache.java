@@ -1,6 +1,9 @@
 package com.dochiri.indexaggregatebench.infrastructure.cache;
 
+import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
+import com.dochiri.indexaggregatebench.application.dto.DailyStatsDelta;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
+import com.dochiri.indexaggregatebench.application.dto.EventStatsBackend;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsCacheKey;
 import com.dochiri.indexaggregatebench.application.port.out.EventStatsCachePort;
 import org.springframework.stereotype.Component;
@@ -37,6 +40,26 @@ public class InMemoryEventStatsCache implements EventStatsCachePort {
     @Override
     public void evictRelatedAfterCommit(Long targetId, Long segmentId) {
         afterCommit(() -> evictRelated(targetId, segmentId));
+    }
+
+    @Override
+    public void applyEventAfterCommit(AppendEventCommand command) {
+        afterCommit(() -> queryCache.forEach((key, ignored) -> {
+            if (!matches(key.targetId(), command.targetId())
+                    || !matches(key.segmentId(), command.segmentId())) {
+                return;
+            }
+            if (key.backend() == EventStatsBackend.RAW) {
+                queryCache.remove(key);
+                return;
+            }
+            if (command.occurredAt().toLocalDate().isBefore(key.from())
+                    || command.occurredAt().toLocalDate().isAfter(key.to())) {
+                return;
+            }
+            EventStats delta = DailyStatsDelta.from(command).toEventStats();
+            queryCache.computeIfPresent(key, (cacheKey, stats) -> stats.plus(delta));
+        }));
     }
 
     @Override
