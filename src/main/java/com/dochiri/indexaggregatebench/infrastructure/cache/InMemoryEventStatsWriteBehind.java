@@ -1,10 +1,11 @@
 package com.dochiri.indexaggregatebench.infrastructure.cache;
 
 import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
-import com.dochiri.indexaggregatebench.application.dto.DailyStatsDelta;
-import com.dochiri.indexaggregatebench.application.dto.DailyStatsKey;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsDelta;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsFlushBatch;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsKey;
 import com.dochiri.indexaggregatebench.application.port.out.EventStatsWriteBehindPort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -13,21 +14,27 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class InMemoryEventStatsWriteBehind implements EventStatsWriteBehindPort {
 
-    private final Map<DailyStatsKey, DailyStatsDelta> pending = new ConcurrentHashMap<>();
+    private final Map<MonthlyStatsKey, MonthlyStatsDelta> pending = new ConcurrentHashMap<>();
+    private volatile String restoredBatchId;
 
     @Override
     public void recordAfterCommit(AppendEventCommand command) {
-        afterCommit(() -> merge(DailyStatsDelta.from(command)));
+        afterCommit(() -> merge(MonthlyStatsDelta.from(command)));
     }
 
     @Override
-    public List<DailyStatsDelta> drainForCurrentTransaction() {
-        List<DailyStatsDelta> batch = List.copyOf(pending.values());
+    public MonthlyStatsFlushBatch drainForCurrentTransaction() {
+        MonthlyStatsFlushBatch batch = new MonthlyStatsFlushBatch(
+                restoredBatchId == null ? UUID.randomUUID().toString() : restoredBatchId,
+                List.copyOf(pending.values())
+        );
+        restoredBatchId = null;
         pending.clear();
         restoreAfterRollback(batch);
         return batch;
@@ -36,7 +43,7 @@ public class InMemoryEventStatsWriteBehind implements EventStatsWriteBehindPort 
     @Override
     public EventStats aggregatePending(EventStatsQuery query) {
         EventStats result = emptyStats();
-        for (DailyStatsDelta delta : pending.values()) {
+        for (MonthlyStatsDelta delta : pending.values()) {
             if (!matches(delta.key(), query)) {
                 continue;
             }
@@ -49,6 +56,7 @@ public class InMemoryEventStatsWriteBehind implements EventStatsWriteBehindPort 
     public int clear() {
         int size = pending.size();
         pending.clear();
+        restoredBatchId = null;
         return size;
     }
 
@@ -57,11 +65,11 @@ public class InMemoryEventStatsWriteBehind implements EventStatsWriteBehindPort 
         return pending.size();
     }
 
-    private void merge(DailyStatsDelta delta) {
-        pending.merge(delta.key(), delta, DailyStatsDelta::plus);
+    private void merge(MonthlyStatsDelta delta) {
+        pending.merge(delta.key(), delta, MonthlyStatsDelta::plus);
     }
 
-    private void restoreAfterRollback(List<DailyStatsDelta> batch) {
+    private void restoreAfterRollback(MonthlyStatsFlushBatch batch) {
         if (batch.isEmpty() || !TransactionSynchronizationManager.isSynchronizationActive()) {
             return;
         }
@@ -76,7 +84,8 @@ public class InMemoryEventStatsWriteBehind implements EventStatsWriteBehindPort 
                 if (status == STATUS_COMMITTED) {
                     return;
                 }
-                batch.forEach(InMemoryEventStatsWriteBehind.this::merge);
+                restoredBatchId = batch.batchId();
+                batch.deltas().forEach(InMemoryEventStatsWriteBehind.this::merge);
             }
         });
     }
@@ -94,8 +103,8 @@ public class InMemoryEventStatsWriteBehind implements EventStatsWriteBehindPort 
         });
     }
 
-    private boolean matches(DailyStatsKey key, EventStatsQuery query) {
-        if (key.statDate().isBefore(query.from()) || key.statDate().isAfter(query.to())) {
+    private boolean matches(MonthlyStatsKey key, EventStatsQuery query) {
+        if (key.statMonth().isBefore(query.fromMonth()) || key.statMonth().isAfter(query.toMonth())) {
             return false;
         }
         if (query.targetId() != null && query.targetId() != key.targetId()) {

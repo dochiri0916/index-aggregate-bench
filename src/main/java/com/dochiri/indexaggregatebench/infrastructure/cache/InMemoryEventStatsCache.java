@@ -1,10 +1,10 @@
 package com.dochiri.indexaggregatebench.infrastructure.cache;
 
 import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
-import com.dochiri.indexaggregatebench.application.dto.DailyStatsDelta;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsBackend;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsCacheKey;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsDelta;
 import com.dochiri.indexaggregatebench.application.port.out.EventStatsCachePort;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -49,15 +49,19 @@ public class InMemoryEventStatsCache implements EventStatsCachePort {
                     || !matches(key.segmentId(), command.segmentId())) {
                 return;
             }
-            if (key.backend() == EventStatsBackend.RAW) {
+            if (key.backend() == EventStatsBackend.RAW
+                    || key.backend() == EventStatsBackend.MONTHLY_STATS) {
                 queryCache.remove(key);
+                return;
+            }
+            if (key.backend() != EventStatsBackend.MONTHLY_STATS_REALTIME) {
                 return;
             }
             if (command.occurredAt().toLocalDate().isBefore(key.from())
                     || command.occurredAt().toLocalDate().isAfter(key.to())) {
                 return;
             }
-            EventStats delta = DailyStatsDelta.from(command).toEventStats();
+            EventStats delta = MonthlyStatsDelta.from(command).toEventStats();
             queryCache.computeIfPresent(key, (cacheKey, stats) -> stats.plus(delta));
         }));
     }

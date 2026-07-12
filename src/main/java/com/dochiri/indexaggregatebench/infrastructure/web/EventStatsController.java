@@ -35,15 +35,30 @@ public class EventStatsController {
         return eventStatsService.getStats(EventStatsBackend.RAW, new EventStatsQuery(targetId, segmentId, from, to), cache);
     }
 
-    @GetMapping("/daily")
-    public TimedEventStats daily(
+    @GetMapping("/monthly")
+    public TimedEventStats monthly(
             @RequestParam(required = false) Long targetId,
             @RequestParam(required = false) Long segmentId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(defaultValue = "false") boolean cache
     ) {
-        return eventStatsService.getStats(EventStatsBackend.DAILY_STATS, new EventStatsQuery(targetId, segmentId, from, to), cache);
+        return eventStatsService.getStats(EventStatsBackend.MONTHLY_STATS, new EventStatsQuery(targetId, segmentId, from, to), cache);
+    }
+
+    @GetMapping("/monthly/realtime")
+    public TimedEventStats monthlyRealtime(
+            @RequestParam(required = false) Long targetId,
+            @RequestParam(required = false) Long segmentId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "false") boolean cache
+    ) {
+        return eventStatsService.getStats(
+                EventStatsBackend.MONTHLY_STATS_REALTIME,
+                new EventStatsQuery(targetId, segmentId, from, to),
+                cache
+        );
     }
 
     @DeleteMapping("/cache")

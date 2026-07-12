@@ -16,6 +16,8 @@ public class SchemaInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        jdbcTemplate.execute("DROP TABLE IF EXISTS event_daily_stats");
+
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS event_logs (
                     record_id BIGINT NOT NULL AUTO_INCREMENT,
@@ -34,8 +36,8 @@ public class SchemaInitializer implements ApplicationRunner {
                 """);
 
         jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS event_daily_stats (
-                    stat_date DATE NOT NULL,
+                CREATE TABLE IF NOT EXISTS event_monthly_stats (
+                    stat_month DATE NOT NULL,
                     target_id BIGINT NOT NULL,
                     segment_id BIGINT NOT NULL,
                     log_count BIGINT NOT NULL,
@@ -43,9 +45,17 @@ public class SchemaInitializer implements ApplicationRunner {
                     total_metric_value BIGINT NOT NULL,
                     total_cost_value BIGINT NOT NULL,
                     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                    PRIMARY KEY (stat_date, target_id, segment_id),
-                    INDEX idx_daily_target_date (target_id, stat_date),
-                    INDEX idx_daily_segment_date (segment_id, stat_date)
+                    PRIMARY KEY (stat_month, target_id, segment_id),
+                    INDEX idx_monthly_target_month (target_id, stat_month),
+                    INDEX idx_monthly_segment_month (segment_id, stat_month)
+                )
+                """);
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS event_monthly_stats_flush_batches (
+                    batch_id VARCHAR(36) NOT NULL,
+                    processed_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    PRIMARY KEY (batch_id)
                 )
                 """);
     }

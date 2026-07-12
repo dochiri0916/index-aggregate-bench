@@ -1,5 +1,5 @@
 package com.dochiri.indexaggregatebench.application.port.in;
 
-public interface FlushEventDailyStatsUseCase {
+public interface FlushEventMonthlyStatsUseCase {
     int flush();
 }

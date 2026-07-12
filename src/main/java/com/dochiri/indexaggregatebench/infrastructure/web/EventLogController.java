@@ -2,7 +2,7 @@ package com.dochiri.indexaggregatebench.infrastructure.web;
 
 import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
 import com.dochiri.indexaggregatebench.application.dto.CompareEventStatsResult;
-import com.dochiri.indexaggregatebench.application.dto.RebuildEventDailyStatsResult;
+import com.dochiri.indexaggregatebench.application.dto.RebuildEventMonthlyStatsResult;
 import com.dochiri.indexaggregatebench.application.dto.SeedEventCondition;
 import com.dochiri.indexaggregatebench.application.dto.SeedEventResult;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
@@ -33,12 +33,12 @@ public class EventLogController {
         return eventLogService.seed(condition);
     }
 
-    @PostMapping("/stats/daily/rebuild")
-    public RebuildEventDailyStatsResult rebuildDailyStats(
+    @PostMapping("/stats/monthly/rebuild")
+    public RebuildEventMonthlyStatsResult rebuildMonthlyStats(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        return eventLogService.rebuildDailyStats(from, to);
+        return eventLogService.rebuildMonthlyStats(from, to);
     }
 
     @GetMapping("/stats/compare")

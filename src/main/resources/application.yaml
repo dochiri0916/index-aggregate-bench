@@ -13,3 +13,5 @@ benchmark:
 bench:
   write-behind:
     flush-interval-ms: ${BENCH_WRITE_BEHIND_FLUSH_INTERVAL_MS:5000}
+    max-attempts: ${BENCH_WRITE_BEHIND_MAX_ATTEMPTS:3}
+    retry-backoff-ms: ${BENCH_WRITE_BEHIND_RETRY_BACKOFF_MS:1000}

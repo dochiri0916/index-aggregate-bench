@@ -34,10 +34,10 @@ public class SchemaIndexService {
 
     public Map<String, Long> rowCounts() {
         Long rawRows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM event_logs", Long.class);
-        Long eventDailyStatsRows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM event_daily_stats", Long.class);
+        Long eventMonthlyStatsRows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM event_monthly_stats", Long.class);
         return Map.of(
                 "eventLogs", rawRows == null ? 0 : rawRows,
-                "eventDailyStats", eventDailyStatsRows == null ? 0 : eventDailyStatsRows
+                "eventMonthlyStats", eventMonthlyStatsRows == null ? 0 : eventMonthlyStatsRows
         );
     }
 

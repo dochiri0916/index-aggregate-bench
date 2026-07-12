@@ -1,9 +1,11 @@
 package com.dochiri.indexaggregatebench.infrastructure.persistence;
 
-import com.dochiri.indexaggregatebench.application.dto.DailyStatsDelta;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
-import com.dochiri.indexaggregatebench.application.port.out.EventDailyStatsPort;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsDelta;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsFlushBatch;
+import com.dochiri.indexaggregatebench.application.port.out.EventMonthlyStatsPort;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -14,45 +16,49 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Repository
-public class JdbcEventDailyStatsCommandAdapter implements EventDailyStatsPort {
+public class JdbcEventMonthlyStatsCommandAdapter implements EventMonthlyStatsPort {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public JdbcEventDailyStatsCommandAdapter(JdbcTemplate jdbcTemplate) {
+    public JdbcEventMonthlyStatsCommandAdapter(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
     public void truncate() {
-        jdbcTemplate.update("TRUNCATE TABLE event_daily_stats");
+        jdbcTemplate.update("TRUNCATE TABLE event_monthly_stats_flush_batches");
+        jdbcTemplate.update("TRUNCATE TABLE event_monthly_stats");
     }
 
     @Override
     public int rebuild(LocalDate from, LocalDate to) {
-        jdbcTemplate.update("DELETE FROM event_daily_stats WHERE stat_date BETWEEN ? AND ?", from, to);
+        validateCompleteMonthRange(from, to);
+        LocalDate fromMonth = from.withDayOfMonth(1);
+        LocalDate toMonth = to.withDayOfMonth(1);
+        jdbcTemplate.update("DELETE FROM event_monthly_stats WHERE stat_month BETWEEN ? AND ?", fromMonth, toMonth);
         return jdbcTemplate.update("""
-                INSERT INTO event_daily_stats (
-                    stat_date, target_id, segment_id, log_count,
+                INSERT INTO event_monthly_stats (
+                    stat_month, target_id, segment_id, log_count,
                     total_duration_seconds, total_metric_value, total_cost_value
                 )
                 SELECT
-                    DATE(occurred_at), target_id, segment_id, COUNT(*),
+                    DATE_FORMAT(occurred_at, '%Y-%m-01'), target_id, segment_id, COUNT(*),
                     SUM(duration_seconds), SUM(metric_value), SUM(cost_value)
                 FROM event_logs
                 WHERE occurred_at >= ?
-                  AND occurred_at < DATE_ADD(?, INTERVAL 1 DAY)
-                GROUP BY DATE(occurred_at), target_id, segment_id
-                """, from, to);
+                  AND occurred_at < ?
+                GROUP BY DATE_FORMAT(occurred_at, '%Y-%m-01'), target_id, segment_id
+                """, from.atStartOfDay(), to.plusDays(1).atStartOfDay());
     }
 
     @Override
-    public int increaseBatch(List<DailyStatsDelta> batch) {
-        if (batch.isEmpty()) {
+    public int increaseBatch(MonthlyStatsFlushBatch batch) {
+        if (batch.isEmpty() || !markBatchAsProcessed(batch.batchId())) {
             return 0;
         }
         String sql = """
-                INSERT INTO event_daily_stats (
-                    stat_date, target_id, segment_id, log_count,
+                INSERT INTO event_monthly_stats (
+                    stat_month, target_id, segment_id, log_count,
                     total_duration_seconds, total_metric_value, total_cost_value
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -62,8 +68,8 @@ public class JdbcEventDailyStatsCommandAdapter implements EventDailyStatsPort {
                     total_metric_value = total_metric_value + VALUES(total_metric_value),
                     total_cost_value = total_cost_value + VALUES(total_cost_value)
                 """;
-        int[][] counts = jdbcTemplate.batchUpdate(sql, batch, batch.size(), (statement, delta) -> {
-            statement.setObject(1, delta.key().statDate());
+        int[][] counts = jdbcTemplate.batchUpdate(sql, batch.deltas(), batch.deltas().size(), (statement, delta) -> {
+            statement.setObject(1, delta.key().statMonth().atDay(1));
             statement.setLong(2, delta.key().targetId());
             statement.setLong(3, delta.key().segmentId());
             statement.setLong(4, delta.logCount());
@@ -80,18 +86,19 @@ public class JdbcEventDailyStatsCommandAdapter implements EventDailyStatsPort {
 
     @Override
     public EventStats aggregate(EventStatsQuery query) {
+        validateCompleteMonthRange(query.from(), query.to());
         StringBuilder sql = new StringBuilder("""
                 SELECT
                     COALESCE(SUM(log_count), 0) AS log_count,
                     COALESCE(SUM(total_duration_seconds), 0) AS total_duration_seconds,
                     COALESCE(SUM(total_metric_value), 0) AS total_metric_value,
                     COALESCE(SUM(total_cost_value), 0) AS total_cost_value
-                FROM event_daily_stats
-                WHERE stat_date BETWEEN ? AND ?
+                FROM event_monthly_stats
+                WHERE stat_month BETWEEN ? AND ?
                 """);
         List<Object> params = new ArrayList<>();
-        params.add(query.from());
-        params.add(query.to());
+        params.add(query.fromMonth().atDay(1));
+        params.add(query.toMonth().atDay(1));
         if (query.targetId() != null) {
             sql.append("  AND target_id = ?\n");
             params.add(query.targetId());
@@ -118,6 +125,23 @@ public class JdbcEventDailyStatsCommandAdapter implements EventDailyStatsPort {
                     average(totalDurationSeconds, logCount), ratio(totalMetricValue, totalCostValue)
             );
         });
+    }
+
+    private boolean markBatchAsProcessed(String batchId) {
+        try {
+            return jdbcTemplate.update(
+                    "INSERT INTO event_monthly_stats_flush_batches (batch_id) VALUES (?)", batchId
+            ) > 0;
+        } catch (DuplicateKeyException exception) {
+            return false;
+        }
+    }
+
+    private void validateCompleteMonthRange(LocalDate from, LocalDate to) {
+        if (!from.equals(from.withDayOfMonth(1))
+                || !to.equals(to.withDayOfMonth(1).plusMonths(1).minusDays(1))) {
+            throw new IllegalArgumentException("monthly stats require complete calendar months");
+        }
     }
 
     private EventStats emptyStats() {

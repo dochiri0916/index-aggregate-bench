@@ -1,5 +1,7 @@
 package com.dochiri.indexaggregatebench.infrastructure.web;
 
+import com.dochiri.indexaggregatebench.application.dto.WriteBehindFlushStatus;
+import com.dochiri.indexaggregatebench.infrastructure.cache.WriteBehindFlushScheduler;
 import com.dochiri.indexaggregatebench.infrastructure.persistence.SchemaIndexService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,9 +15,12 @@ import java.util.Map;
 public class BenchmarkAdminController {
 
     private final SchemaIndexService schemaIndexService;
+    private final WriteBehindFlushScheduler writeBehindFlushScheduler;
 
-    public BenchmarkAdminController(SchemaIndexService schemaIndexService) {
+    public BenchmarkAdminController(SchemaIndexService schemaIndexService,
+                                    WriteBehindFlushScheduler writeBehindFlushScheduler) {
         this.schemaIndexService = schemaIndexService;
+        this.writeBehindFlushScheduler = writeBehindFlushScheduler;
     }
 
     @GetMapping("/indexes/raw")
@@ -36,5 +41,10 @@ public class BenchmarkAdminController {
     @GetMapping("/row-counts")
     public Map<String, Long> rowCounts() {
         return schemaIndexService.rowCounts();
+    }
+
+    @GetMapping("/write-behind/status")
+    public WriteBehindFlushStatus writeBehindStatus() {
+        return writeBehindFlushScheduler.status();
     }
 }

@@ -1,15 +1,14 @@
 package com.dochiri.indexaggregatebench.application.port.out;
 
-import com.dochiri.indexaggregatebench.application.dto.DailyStatsDelta;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsFlushBatch;
 
 import java.time.LocalDate;
-import java.util.List;
 
-public interface EventDailyStatsPort {
+public interface EventMonthlyStatsPort {
     void truncate();
     int rebuild(LocalDate from, LocalDate to);
-    int increaseBatch(List<DailyStatsDelta> batch);
+    int increaseBatch(MonthlyStatsFlushBatch batch);
     EventStats aggregate(EventStatsQuery query);
 }

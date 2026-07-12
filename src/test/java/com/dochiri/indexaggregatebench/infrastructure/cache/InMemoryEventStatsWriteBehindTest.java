@@ -3,6 +3,7 @@ package com.dochiri.indexaggregatebench.infrastructure.cache;
 import com.dochiri.indexaggregatebench.application.dto.AppendEventCommand;
 import com.dochiri.indexaggregatebench.application.dto.EventStats;
 import com.dochiri.indexaggregatebench.application.dto.EventStatsQuery;
+import com.dochiri.indexaggregatebench.application.dto.MonthlyStatsFlushBatch;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -16,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class InMemoryEventStatsWriteBehindTest {
 
     @Test
-    @DisplayName("저장 대기 이벤트는 데이터베이스 flush 전에도 실시간 통계에 반영된다")
+    @DisplayName("저장 대기 이벤트는 realtime 월별 통계에서 데이터베이스 flush 전에도 반영된다")
     void pendingEventShouldBeVisibleBeforeFlush() {
         // given
         InMemoryEventStatsWriteBehind writeBehind = new InMemoryEventStatsWriteBehind();
@@ -33,6 +34,27 @@ class InMemoryEventStatsWriteBehindTest {
         assertThat(result.totalDurationSeconds()).isEqualTo(6);
         assertThat(result.totalMetricValue()).isEqualTo(10);
         assertThat(result.totalCostValue()).isEqualTo(14);
+    }
+
+    @Test
+    @DisplayName("월 경계를 넘는 이벤트는 발생한 월의 pending 통계에만 포함된다")
+    void pendingEventShouldBeGroupedByOccurredMonth() {
+        // given
+        InMemoryEventStatsWriteBehind writeBehind = new InMemoryEventStatsWriteBehind();
+        writeBehind.recordAfterCommit(command(LocalDateTime.of(2026, 4, 30, 23, 59)));
+        writeBehind.recordAfterCommit(command(LocalDateTime.of(2026, 5, 1, 0, 0)));
+
+        // when
+        EventStats april = writeBehind.aggregatePending(new EventStatsQuery(
+                1L, 2L, LocalDate.of(2026, 4, 1), LocalDate.of(2026, 4, 30)
+        ));
+        EventStats may = writeBehind.aggregatePending(new EventStatsQuery(
+                1L, 2L, LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 31)
+        ));
+
+        // then
+        assertThat(april.logCount()).isEqualTo(1);
+        assertThat(may.logCount()).isEqualTo(1);
     }
 
     @Test
@@ -56,14 +78,14 @@ class InMemoryEventStatsWriteBehindTest {
     }
 
     @Test
-    @DisplayName("flush 트랜잭션이 롤백되면 비운 델타를 버퍼로 복원한다")
+    @DisplayName("flush 트랜잭션이 롤백되면 비운 월별 델타를 같은 batch로 복원한다")
     void drainedBatchShouldBeRestoredAfterRollback() {
         // given
         InMemoryEventStatsWriteBehind writeBehind = new InMemoryEventStatsWriteBehind();
         writeBehind.recordAfterCommit(command(LocalDateTime.of(2026, 4, 1, 10, 0)));
         TransactionSynchronizationManager.initSynchronization();
         try {
-            writeBehind.drainForCurrentTransaction();
+            MonthlyStatsFlushBatch drained = writeBehind.drainForCurrentTransaction();
 
             // when
             TransactionSynchronizationManager.getSynchronizations().forEach(
@@ -73,6 +95,8 @@ class InMemoryEventStatsWriteBehindTest {
             // then
             assertThat(writeBehind.size()).isEqualTo(1);
             assertThat(writeBehind.aggregatePending(query()).logCount()).isEqualTo(1);
+            MonthlyStatsFlushBatch retried = writeBehind.drainForCurrentTransaction();
+            assertThat(retried.batchId()).isEqualTo(drained.batchId());
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }

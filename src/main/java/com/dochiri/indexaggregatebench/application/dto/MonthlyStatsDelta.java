@@ -3,21 +3,21 @@ package com.dochiri.indexaggregatebench.application.dto;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-public record DailyStatsDelta(
-        DailyStatsKey key,
+public record MonthlyStatsDelta(
+        MonthlyStatsKey key,
         long logCount,
         long totalDurationSeconds,
         long totalMetricValue,
         long totalCostValue
 ) {
 
-    public static DailyStatsDelta from(AppendEventCommand command) {
-        return new DailyStatsDelta(DailyStatsKey.from(command), 1,
+    public static MonthlyStatsDelta from(AppendEventCommand command) {
+        return new MonthlyStatsDelta(MonthlyStatsKey.from(command), 1,
                 command.durationSeconds(), command.metricValue(), command.costValue());
     }
 
-    public DailyStatsDelta plus(DailyStatsDelta other) {
-        return new DailyStatsDelta(
+    public MonthlyStatsDelta plus(MonthlyStatsDelta other) {
+        return new MonthlyStatsDelta(
                 key,
                 logCount + other.logCount,
                 totalDurationSeconds + other.totalDurationSeconds,
